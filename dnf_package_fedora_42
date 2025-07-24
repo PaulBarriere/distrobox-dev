@@ -5,3 +5,6 @@ zsh
 neovim
 zoxide
 uv
+go
+keepassxc
+fd-find

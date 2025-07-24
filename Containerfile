@@ -20,7 +20,7 @@ RUN \
 	dnf -y install starship
 
 # ZSH :
-RUN chsh -s $(which zsh) 
+RUN chsh -s /usr/bin/zsh
 
 # ChezMoi :
 RUN sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/bin
