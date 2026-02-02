@@ -1,12 +1,12 @@
-FROM registry.fedoraproject.org/fedora-toolbox:42
+FROM registry.fedoraproject.org/fedora-toolbox:43
 
 # gcloud repo config
 COPY ../utils/google-cloud-sdk.repo /etc/yum.repos.d/google-cloud-sdk.repo 
 
 # dnf install
-COPY ./dnf_package_fedora_42 /tmp/dnf_package_fedora_42
+COPY ./dnf_package_fedora_43 /tmp/dnf_package_fedora_43
 RUN dnf -y update
-RUN dnf -y install $(cat /tmp/dnf_package_fedora_42) 
+RUN dnf -y install $(cat /tmp/dnf_package_fedora_43) 
 RUN dnf -y clean all
 
 # lazygit :
@@ -18,6 +18,12 @@ RUN \
 RUN \
 	dnf -y copr enable atim/starship && \
 	dnf -y install starship
+
+# Terraform
+RUN \
+  dnf install -y dnf-plugins-core && \
+  dnf config-manager addrepo --from-repofile=https://rpm.releases.hashicorp.com/fedora/hashicorp.repo && \
+  dnf -y install terraform
 
 # ZSH :
 RUN chsh -s /usr/bin/zsh
