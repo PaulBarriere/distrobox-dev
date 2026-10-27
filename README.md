@@ -4,131 +4,148 @@ This repository contains the configuration for my personal development environme
 
 As a primary user of Fedora Silverblue, this project allows me to maintain a minimal and immutable base OS while having a rich, customized development environment inside a container.
 
+## Philosophy
+
+*   **The host knows nothing.** Every dev tool lives in the image. Nothing is installed on the host besides Distrobox and fonts.
+*   **One image = one development environment.** Each development environment (e.g. `work_edf`) has its own image and its own container, with its own tool versions, side by side.
+*   **The image is disposable, the home is not.** The container home lives on the host (`~/distrobox_homes/<container name>`, see `distrobox.conf`). To update anything: rebuild the image and recreate the container, nothing is lost.
+
 ## Context
 
-I am a developer who values the robustness of Fedora Silverblue. For my development workflow, I rely on:
+For my development workflow, I rely on:
 
 *   **Distrobox** to create development containers that seamlessly integrate with the host.
-*   **Neovim** with the **LazyVim** configuration as my primary code editor for a modern and efficient development experience.
+*   **Homebrew** to install dev tools inside the image, declared in a `Brewfile` per development environment.
+*   **Neovim** with the **LazyVim** configuration as my primary code editor.
 *   **Nerd Fonts** for optimal display of icons and symbols in my terminal and editor.
-
-This repository centralizes the configuration of this environment to make it easily deployable.
+*   **chezmoi** to manage my dotfiles, with secrets stored in **KeePassXC**.
 
 ## Project Structure
 
 ```
 .
+├── brewfiles
+│   └── work_edf.Brewfile
+├── certs
 ├── Containerfile
-├── dnf_package_fedora_42
+├── distrobox.conf
+├── dnf_packages
 ├── README.md
 └── utils
     └── google-cloud-sdk.repo
 ```
 
-*   `Containerfile`: The build file for the image, based on `fedora-toolbox:42`.
-*   `dnf_package_fedora_42`: The list of DNF packages to be installed in the image.
-*   **utils/**: Contains utility files shared across different configurations.
-*   **README.md**: This file.
+*   `Containerfile`: The build file for the image, based on `fedora-toolbox:44`. The development environment to build is selected with `--build-arg DEV_ENV=<name>`.
+*   `dnf_packages`: System packages installed with DNF (shell, system libraries, GUI apps, gcloud, Homebrew requirements).
+*   `brewfiles/<dev env>.Brewfile`: Dev tools installed with Homebrew for a given development environment.
+*   `certs/`: Extra CA certificates added to the image (not versioned, see step 4).
+*   `distrobox.conf`: Distrobox configuration (one home per container on the host).
+*   `utils/`: Repository files used by the build.
 
 ## Development Environment Setup (from Fedora Silverblue)
 
-Here are the steps to set up the complete development environment from a fresh Fedora Silverblue installation.
-
 ### 1. Prerequisites: Install Distrobox
 
-On Fedora Silverblue, `distrobox` is usually pre-installed. If not, you can install it with the following command:
+On Fedora Silverblue, `distrobox` is usually pre-installed. If not:
 ```bash
 rpm-ostree install distrobox
 ```
-Follow the instructions and reboot your machine to apply the changes.
+Then reboot your machine to apply the changes.
 
 ### 2. Install Nerd Fonts
 
 LazyVim and other command-line tools use icons that require a "Nerd Font". We will install the "Hack" font.
 
 ```bash
-# Download the font
 curl -o /tmp/Hack.zip -L https://github.com/ryanoasis/nerd-fonts/releases/download/v3.4.0/Hack.zip
-
-# Create local font directory and unzip
 mkdir -p ~/.local/share/fonts
 unzip -d ~/.local/share/fonts /tmp/Hack.zip
-
-# Update the font cache
 fc-cache -fv
-
-# Clean up
 rm /tmp/Hack.zip
 ```
 
-Natively the terminal of the Sylverblue (pystix) will use the fonts.
+The default Silverblue terminal (Ptyxis) will pick up the font.
 
 ### 3. Clone This Repository
 
-Clone this repository into a directory of your choice on your host machine.
 ```bash
 git clone https://github.com/PaulBarriere/distrobox-dev.git ~/dev_config
 cd ~/dev_config
 ```
 
-### 4. Put the distrobox configuration file :
+### 4. Add Corporate CA Certificates (behind a TLS-intercepting proxy only)
 
-Create a symbolic link from the distrobox config file to the `.config` path :
+Behind a corporate proxy doing TLS interception (e.g. at EDF), the build fails with `SSL certificate problem: self-signed certificate in certificate chain`. Copy the corporate CA certificates (`.p11-kit`, `.crt` or `.pem`) into `certs/`, they are added to the image trust store:
+
+```bash
+cp /etc/pki/ca-trust/source/*EDF*.p11-kit certs/
+```
+
+`certs/` is ignored by git.
+
+### 5. Link the Distrobox Configuration File
+
 ```sh
-mkdir ~/.config/distrobox
-ln -s ./distrobox.conf ~/.config/distrobox/distrobox.conf
+mkdir -p ~/.config/distrobox
+ln -s "$PWD/distrobox.conf" ~/.config/distrobox/distrobox.conf
 ```
 
-### 5. Build the Distrobox Image
+### 6. Build the Image
 
-Build the image :
 ```bash
-podman build --pull="always" -t distrobox-dev .
+podman build --pull=always --no-cache --build-arg DEV_ENV=work_edf -t work_edf .
 ```
 
-### 6. Create and Launch the Distrobox Container
+If your UID on the host is not `1000` (check with `id -u`), add `--build-arg USER_UID=$(id -u)`, otherwise you won't be able to use `brew` inside the container.
 
-Once the image is built, you can create a Distrobox container from it.
+### 7. Create and Enter the Container
+
 ```bash
-distrobox create --image distrobox-dev --name distro-dev
+SHELL=/usr/bin/zsh distrobox create --image work_edf --name work_edf
+distrobox enter work_edf
 ```
 
-To enter your new development environment:
+### 8. Post-Installation Configuration (inside the Distrobox)
+
+- Bring your KeePass database (the dotfiles templates read their secrets from it).
+- Import your dotfiles with chezmoi:
+  ```bash
+  chezmoi init <YOUR_DOTFILES_REPO>
+  chezmoi apply
+  ```
+
+## Updating
+
+Rebuild the image, then recreate the container **with the same name** to keep the same home:
+
 ```bash
-distrobox enter distro-dev
+podman build --pull=always --no-cache --build-arg DEV_ENV=work_edf -t work_edf .
+distrobox rm -f work_edf    # never --rm-home: it would delete the home
+SHELL=/usr/bin/zsh distrobox create --image work_edf --name work_edf
 ```
 
-### 7. Post-Installation Configuration (inside the Distrobox)
+Things to know:
 
-Once inside the distrobox there are two steps needed :
+*   `SHELL=/usr/bin/zsh` is required: distrobox gives your user the host shell (bash on Silverblue) when the container is first started, and never changes it afterwards.
+*   `--no-cache` is required: without it, podman reuses the cached layers and nothing gets updated unless `dnf_packages` or the `Brewfile` changed.
+*   Anything installed by hand in the container (`brew install`, `dnf install`) is lost on recreation. Add it to the `Brewfile` or `dnf_packages` instead. Homebrew auto-update is disabled for the same reason.
+*   A new container name means a new, empty home.
+*   What tools download into the home is kept and **not** updated by a rebuild: Neovim plugins (`~/.local/share/nvim`), uv Python versions, Go toolchains, global npm packages... Update them with the tool itself (`:Lazy update`, `uv python upgrade`, ...).
 
-- Bring your keepass file.
-- Use chezmoi to import the configuration files.
+## Adding a New Development Environment
 
-This environment includes `chezmoi` to manage your configuration files (dotfiles). Initialize it with your dotfiles repository.
-```bash
-chezmoi init <YOUR_DOTFILES_REPO>
-chezmoi apply
-```
+1.  Create `brewfiles/<name>.Brewfile`.
+2.  Build with `--build-arg DEV_ENV=<name> -t <name>`.
+3.  Create the container with `SHELL=/usr/bin/zsh distrobox create --image <name> --name <name>`.
 
-## Image Contents
+## Image Contents (`work_edf`)
 
-For now, there is only one image for my dev containers.
-The base image is `registry.fedoraproject.org/fedora-toolbox:42`.
+Base image: `registry.fedoraproject.org/fedora-toolbox:44`.
 
-### Installed Packages and Configurations:
+*   **DNF**: zsh, Google Cloud CLI, KeePassXC, pinentry, go, Homebrew requirements (gcc, git, curl, procps-ng, file).
+*   **podman**: runs the host podman through `distrobox-host-exec`.
+*   **Homebrew**: neovim, ripgrep, fd, starship, zoxide, fzf, bat, lazygit, glab, chezmoi, node, uv, terraform.
 
-*   **Google Cloud SDK**: The repository is configured for an easy installation of `gcloud` tools.
-*   **DNF Packages**: A list of packages is installed from the `dnf_package_fedora_42` file, including essential development tools.
-*   **Lazygit**: A simple terminal UI for Git, installed via COPR.
-*   **Starship**: A customizable cross-shell prompt.
-*   **ZSH**: Set as the default shell for the user.
-*   **ChezMoi**: A tool to manage your configuration files (dotfiles).
-*   **Go**: Golang programming langage.
-*   **keepassxc**: For handling ".kdbx" files.
+## Next Steps
 
-## Next steps:
-
-* Create a modular way of building an image. All dev containers does not need
-  golang, terraform, gcloud, ...
-* Use buildah to build and remove Containerfile for bash scripts.
+*   Use buildah to build and replace the Containerfile with bash scripts.
